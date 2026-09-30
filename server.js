@@ -7,8 +7,9 @@ app.use(express.json());
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 
-// Memoria simple para guardar el estado/navegación de cada usuario
+// Memoria de sesiones y contador global de stickers (1 a 100)
 const userSessions = {};
+let stickerCounter = 0; 
 
 // Función auxiliar para enviar mensajes a WhatsApp
 async function sendWhatsAppMessage(to, text) {
@@ -32,19 +33,18 @@ async function sendWhatsAppMessage(to, text) {
   }
 }
 
-// Menú Principal Llanix
+// Menú Principal
 const MAIN_MENU = 
 `¡Hola! Bienvenid@ a Llanix 🚀
 Te acompañamos paso a paso a cumplir tus metas y alcanzar tus sueños financieros.
 
 Selecciona una opción respondiendo con el número correspondiente:
-1️⃣ Tienda de Stickers
+1️⃣ Tienda de Stickers (¡Premio de $140.000 al cliente #100! 🏆)
 2️⃣ Ahorro Libre
 3️⃣ Reto $2M
 4️⃣ Cadenas de Ahorro
 5️⃣ Hablar con un asesor`;
 
-// Endpoint GET para verificación de Webhook de Meta
 app.get('/webhook', (req, res) => {
   const verifyToken = process.env.VERIFY_TOKEN || 'llanix_verify_token';
   const mode = req.query['hub.mode'];
@@ -61,7 +61,6 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// Endpoint POST para manejar los mensajes entrantes
 app.post('/webhook', async (req, res) => {
   const body = req.body;
 
@@ -76,14 +75,12 @@ app.post('/webhook', async (req, res) => {
       const from = message.from;
       const text = message.text ? message.text.body.trim().toUpperCase() : '';
 
-      // Si el usuario escribe 0, MENU u HOLA, se resetea al menú principal
       if (text === '0' || text === 'MENU' || text === 'HOLA') {
         userSessions[from] = 'MAIN';
         await sendWhatsAppMessage(from, MAIN_MENU);
         return res.sendStatus(200);
       }
 
-      // Obtener el estado actual del usuario
       const currentStep = userSessions[from] || 'MAIN';
 
       switch (currentStep) {
@@ -92,20 +89,23 @@ app.post('/webhook', async (req, res) => {
             userSessions[from] = 'STICKERS';
             await sendWhatsAppMessage(
               from,
-              `🎨 Colección de Stickers Llanix\n` +
-              `Dale estilo a tu espacio y lleva el espíritu Llanix contigo.\n\n` +
-              `Opciones disponibles:\n` +
-              `- Pack x3: $10.000 COP\n` +
-              `- Pack x10: $25.000 COP\n` +
-              `- Colección completa: $45.000 COP\n\n` +
-              `Responde con el número de la opción que deseas adquirir o escribe 0 para volver al menú principal.`
+              `🎨 *Colección de Stickers Llanix*\n` +
+              `Cada sticker tiene un valor de *$2.000 COP*.\n\n` +
+              `🏆 *¡Incentivo Llanix!*\n` +
+              `El cliente que realice la compra *número 100* ganará un premio en efectivo de *$140.000 COP* 💵.\n\n` +
+              `¿Cuántos stickers deseas adquirir hoy?\n` +
+              `1. 1 Sticker ($2.000 COP)\n` +
+              `2. 3 Stickers ($6.000 COP)\n` +
+              `3. 5 Stickers ($10.000 COP)\n` +
+              `4. Otra cantidad / Pedido especial\n\n` +
+              `Responde con el número de la opción o escribe 0 para volver al menú principal.`
             );
           } else if (text === '2') {
             userSessions[from] = 'AHORRO_LIBRE';
             await sendWhatsAppMessage(
               from,
-              `💰 Ahorro Libre - Llanix\n` +
-              `Te acompañamos a construir tu hábito de ahorro a tu propio ritmo, sin presiones ni cuotas fijas.\n\n` +
+              `💰 *Ahorro Libre - Llanix*\n` +
+              `Te acompañamos a construir tu hábito de ahorro a tu propio ritmo.\n\n` +
               `¿Qué deseas hacer hoy?\n` +
               `A. Consultar mi saldo acumulado\n` +
               `B. Realizar un nuevo aporte / abono\n` +
@@ -116,8 +116,8 @@ app.post('/webhook', async (req, res) => {
             userSessions[from] = 'RETO_2M';
             await sendWhatsAppMessage(
               from,
-              `🏆 Reto $2.000.000 COP\n` +
-              `Tu camino guiado para alcanzar esa gran meta de $2M que te trazaste.\n\n` +
+              `🏆 *Reto $2.000.000 COP*\n` +
+              `Tu camino guiado para alcanzar esa gran meta de $2M.\n\n` +
               `Elige una opción:\n` +
               `1. Ver mi progreso hacia la meta\n` +
               `2. Registrar aporte de la semana\n` +
@@ -128,8 +128,8 @@ app.post('/webhook', async (req, res) => {
             userSessions[from] = 'CADENAS';
             await sendWhatsAppMessage(
               from,
-              `🤝 Cadenas de Ahorro Llanix\n` +
-              `Ahorro en comunidad: nos apoyamos en equipo para que todos alcancen sus metas con turnos organizados.\n\n` +
+              `🤝 *Cadenas de Ahorro Llanix*\n` +
+              `Ahorro en comunidad con turnos organizados.\n\n` +
               `Opciones:\n` +
               `A. Ver cadenas activas y cupos\n` +
               `B. Consultar el estado de mi cadena actual\n` +
@@ -140,10 +140,10 @@ app.post('/webhook', async (req, res) => {
             userSessions[from] = 'ASESOR';
             await sendWhatsAppMessage(
               from,
-              `👤 Atención Personalizada Llanix\n` +
-              `Un integrante de nuestro equipo se sumará a este chat en breve para acompañarte en lo que necesites.\n\n` +
-              `Escríbenos tu duda o sueño a realizar mientras te conectamos.\n\n` +
-              `(Escribe 0 si deseas regresar al menú principal)`
+              `👤 *Atención Personalizada Llanix*\n` +
+              `Un integrante de nuestro equipo se sumará a este chat en breve.\n\n` +
+              `Escríbenos tu duda mientras te conectamos.\n` +
+              `(Escribe 0 para regresar al menú principal)`
             );
           } else {
             await sendWhatsAppMessage(from, MAIN_MENU);
@@ -151,17 +151,53 @@ app.post('/webhook', async (req, res) => {
           break;
 
         case 'STICKERS':
-          await sendWhatsAppMessage(
-            from,
-            `¡Perfecto! Hemos registrado tu interés. Un asesor te confirmará los detalles de tu pedido de stickers.\n\nEscribe 0 para volver al menú principal.`
-          );
+          let qty = 0;
+          if (text === '1') qty = 1;
+          else if (text === '2') qty = 3;
+          else if (text === '3') qty = 5;
+
+          if (qty > 0) {
+            const assignedTurns = [];
+            for (let i = 0; i < qty; i++) {
+              stickerCounter = (stickerCounter % 100) + 1;
+              assignedTurns.push(`#${stickerCounter}`);
+            }
+
+            const totalAmount = (qty * 2000).toLocaleString('es-CO');
+            const turnListText = assignedTurns.join(', ');
+
+            await sendWhatsAppMessage(
+              from,
+              `¡Excelente elección! 🎨\n\n` +
+              `📋 *Detalle de tu pedido:*\n` +
+              `- *Cantidad:* ${qty} Sticker(s)\n` +
+              `- *Total a pagar:* $${totalAmount} COP\n\n` +
+              `🎟️ *Tus números de turno asignados:*\n` +
+              `Has quedado registrado con los turnos *${turnListText}* en la ronda actual.\n` +
+              `_(¡El comprador del turno #100 se lleva los $140.000 COP en efectivo!)_\n\n` +
+              `🔑 *Medio de Pago (Bre-B):*\n` +
+              `Realiza tu transferencia a la *Llave Bre-B: 0093393998*\n\n` +
+              `📲 Por favor, *envíanos el comprobante de pago por este chat* para validar tu pedido.\n\n` +
+              `Escribe 0 para volver al menú principal.`
+            );
+          } else if (text === '4') {
+            await sendWhatsAppMessage(
+              from,
+              `🎨 *Pedido Personalizado de Stickers*\n\n` +
+              `Por favor escríbenos cuántos stickers deseas encargar y un asesor te responderá con los turnos disponibles y el total a pagar.\n\n` +
+              `🔑 *Llave de Pago Bre-B:* 0093393998\n\n` +
+              `Escribe 0 para volver al menú principal.`
+            );
+          } else {
+            await sendWhatsAppMessage(from, `Opción no válida. Por favor responde 1, 2, 3, 4 o presiona 0 para volver al menú.`);
+          }
           break;
 
         case 'AHORRO_LIBRE':
           if (['A', 'B', 'C'].includes(text)) {
             await sendWhatsAppMessage(
               from,
-              `Procesando tu solicitud de Ahorro Libre (Opción ${text})...\nEn breve un asesor o el sistema te enviará la información requerida.\n\nEscribe 0 para volver al menú.`
+              `Procesando tu solicitud de Ahorro Libre (Opción ${text})...\nEn breve te contactaremos.\n\nEscribe 0 para volver al menú.`
             );
           } else {
             await sendWhatsAppMessage(from, `Opción no válida. Por favor responde A, B, C o presiona 0 para volver al menú.`);
