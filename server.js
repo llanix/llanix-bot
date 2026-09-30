@@ -7,11 +7,11 @@ app.use(express.json());
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 
-// Memoria de sesiones y contador global de stickers (1 a 100)
+// Estado de usuarios y contador de stickers (1 a 100)
 const userSessions = {};
-let stickerCounter = 0; 
+let stickerCounter = 0;
 
-// Función auxiliar para enviar mensajes a WhatsApp
+// Función para enviar mensajes a WhatsApp
 async function sendWhatsAppMessage(to, text) {
   try {
     await axios({
@@ -33,18 +33,24 @@ async function sendWhatsAppMessage(to, text) {
   }
 }
 
-// Menú Principal
+// Menú de lanzamiento exclusivo de Stickers
 const MAIN_MENU = 
-`¡Hola! Bienvenid@ a Llanix 🚀
-Te acompañamos paso a paso a cumplir tus metas y alcanzar tus sueños financieros.
+`¡Hola! Bienvenid@ a Llanix 🎨
 
-Selecciona una opción respondiendo con el número correspondiente:
-1️⃣ Tienda de Stickers (¡Premio de $140.000 al cliente #100! 🏆)
-2️⃣ Ahorro Libre
-3️⃣ Reto $2M
-4️⃣ Cadenas de Ahorro
-5️⃣ Hablar con un asesor`;
+🏆 *¡Gran Dinámica de Stickers Llanix!*
+Cada sticker cuesta *$2.000 COP* e incluye un *código único de registro*. 
+El comprador que obtenga el registro *#100 (STK-100)* ganará *$140.000 COP* en efectivo 💵.
 
+¿Cuántos stickers deseas adquirir hoy?
+1️⃣ 1 Sticker ($2.000 COP)
+2️⃣ 3 Stickers ($6.000 COP)
+3️⃣ 5 Stickers ($10.000 COP)
+4️⃣ Otra cantidad / Pedido especial
+5️⃣ Hablar con un asesor
+
+Responde con el número de la opción (1, 2, 3, 4 o 5).`;
+
+// Webhook de verificación para Meta
 app.get('/webhook', (req, res) => {
   const verifyToken = process.env.VERIFY_TOKEN || 'llanix_verify_token';
   const mode = req.query['hub.mode'];
@@ -58,9 +64,12 @@ app.get('/webhook', (req, res) => {
     } else {
       res.sendStatus(403);
     }
+  } else {
+    res.sendStatus(400);
   }
 });
 
+// Procesamiento de mensajes de WhatsApp
 app.post('/webhook', async (req, res) => {
   const body = req.body;
 
@@ -75,161 +84,62 @@ app.post('/webhook', async (req, res) => {
       const from = message.from;
       const text = message.text ? message.text.body.trim().toUpperCase() : '';
 
-      if (text === '0' || text === 'MENU' || text === 'HOLA') {
+      // Volver al menú de stickers desde cualquier punto
+      if (text === '0' || text === 'MENU' || text === 'HOLA' || text === 'INICIO' || text === 'STICKERS') {
         userSessions[from] = 'MAIN';
         await sendWhatsAppMessage(from, MAIN_MENU);
         return res.sendStatus(200);
       }
 
-      const currentStep = userSessions[from] || 'MAIN';
+      let qty = 0;
+      if (text === '1') qty = 1;
+      else if (text === '2') qty = 3;
+      else if (text === '3') qty = 5;
 
-      switch (currentStep) {
-        case 'MAIN':
-          if (text === '1') {
-            userSessions[from] = 'STICKERS';
-            await sendWhatsAppMessage(
-              from,
-              `🎨 *Colección de Stickers Llanix*\n` +
-              `Cada sticker tiene un valor de *$2.000 COP*.\n\n` +
-              `🏆 *¡Incentivo Llanix!*\n` +
-              `El cliente que realice la compra *número 100* ganará un premio en efectivo de *$140.000 COP* 💵.\n\n` +
-              `¿Cuántos stickers deseas adquirir hoy?\n` +
-              `1. 1 Sticker ($2.000 COP)\n` +
-              `2. 3 Stickers ($6.000 COP)\n` +
-              `3. 5 Stickers ($10.000 COP)\n` +
-              `4. Otra cantidad / Pedido especial\n\n` +
-              `Responde con el número de la opción o escribe 0 para volver al menú principal.`
-            );
-          } else if (text === '2') {
-            userSessions[from] = 'AHORRO_LIBRE';
-            await sendWhatsAppMessage(
-              from,
-              `💰 *Ahorro Libre - Llanix*\n` +
-              `Te acompañamos a construir tu hábito de ahorro a tu propio ritmo.\n\n` +
-              `¿Qué deseas hacer hoy?\n` +
-              `A. Consultar mi saldo acumulado\n` +
-              `B. Realizar un nuevo aporte / abono\n` +
-              `C. Solicitar retiro de mi ahorro\n` +
-              `0. Volver al menú principal`
-            );
-          } else if (text === '3') {
-            userSessions[from] = 'RETO_2M';
-            await sendWhatsAppMessage(
-              from,
-              `🏆 *Reto $2.000.000 COP*\n` +
-              `Tu camino guiado para alcanzar esa gran meta de $2M.\n\n` +
-              `Elige una opción:\n` +
-              `1. Ver mi progreso hacia la meta\n` +
-              `2. Registrar aporte de la semana\n` +
-              `3. Ver plan de pagos / tabla del reto\n` +
-              `0. Volver al menú principal`
-            );
-          } else if (text === '4') {
-            userSessions[from] = 'CADENAS';
-            await sendWhatsAppMessage(
-              from,
-              `🤝 *Cadenas de Ahorro Llanix*\n` +
-              `Ahorro en comunidad con turnos organizados.\n\n` +
-              `Opciones:\n` +
-              `A. Ver cadenas activas y cupos\n` +
-              `B. Consultar el estado de mi cadena actual\n` +
-              `C. Cómo funcionan las cadenas\n` +
-              `0. Volver al menú principal`
-            );
-          } else if (text === '5') {
-            userSessions[from] = 'ASESOR';
-            await sendWhatsAppMessage(
-              from,
-              `👤 *Atención Personalizada Llanix*\n` +
-              `Un integrante de nuestro equipo se sumará a este chat en breve.\n\n` +
-              `Escríbenos tu duda mientras te conectamos.\n` +
-              `(Escribe 0 para regresar al menú principal)`
-            );
-          } else {
-            await sendWhatsAppMessage(from, MAIN_MENU);
-          }
-          break;
+      if (qty > 0) {
+        // Asignación de códigos STK consecutivos
+        const assignedCodes = [];
+        for (let i = 0; i < qty; i++) {
+          stickerCounter = (stickerCounter % 100) + 1;
+          const formattedCode = `STK-${String(stickerCounter).padStart(3, '0')}`;
+          assignedCodes.push(formattedCode);
+        }
 
-        case 'STICKERS':
-          let qty = 0;
-          if (text === '1') qty = 1;
-          else if (text === '2') qty = 3;
-          else if (text === '3') qty = 5;
+        const totalAmount = (qty * 2000).toLocaleString('es-CO');
+        const codeListText = assignedCodes.map(code => `• *${code}*`).join('\n');
 
-          if (qty > 0) {
-            const assignedTurns = [];
-            for (let i = 0; i < qty; i++) {
-              stickerCounter = (stickerCounter % 100) + 1;
-              assignedTurns.push(`#${stickerCounter}`);
-            }
-
-            const totalAmount = (qty * 2000).toLocaleString('es-CO');
-            const turnListText = assignedTurns.join(', ');
-
-            await sendWhatsAppMessage(
-              from,
-              `¡Excelente elección! 🎨\n\n` +
-              `📋 *Detalle de tu pedido:*\n` +
-              `- *Cantidad:* ${qty} Sticker(s)\n` +
-              `- *Total a pagar:* $${totalAmount} COP\n\n` +
-              `🎟️ *Tus números de turno asignados:*\n` +
-              `Has quedado registrado con los turnos *${turnListText}* en la ronda actual.\n` +
-              `_(¡El comprador del turno #100 se lleva los $140.000 COP en efectivo!)_\n\n` +
-              `🔑 *Medio de Pago (Bre-B):*\n` +
-              `Realiza tu transferencia a la *Llave Bre-B: 0093393998*\n\n` +
-              `📲 Por favor, *envíanos el comprobante de pago por este chat* para validar tu pedido.\n\n` +
-              `Escribe 0 para volver al menú principal.`
-            );
-          } else if (text === '4') {
-            await sendWhatsAppMessage(
-              from,
-              `🎨 *Pedido Personalizado de Stickers*\n\n` +
-              `Por favor escríbenos cuántos stickers deseas encargar y un asesor te responderá con los turnos disponibles y el total a pagar.\n\n` +
-              `🔑 *Llave de Pago Bre-B:* 0093393998\n\n` +
-              `Escribe 0 para volver al menú principal.`
-            );
-          } else {
-            await sendWhatsAppMessage(from, `Opción no válida. Por favor responde 1, 2, 3, 4 o presiona 0 para volver al menú.`);
-          }
-          break;
-
-        case 'AHORRO_LIBRE':
-          if (['A', 'B', 'C'].includes(text)) {
-            await sendWhatsAppMessage(
-              from,
-              `Procesando tu solicitud de Ahorro Libre (Opción ${text})...\nEn breve te contactaremos.\n\nEscribe 0 para volver al menú.`
-            );
-          } else {
-            await sendWhatsAppMessage(from, `Opción no válida. Por favor responde A, B, C o presiona 0 para volver al menú.`);
-          }
-          break;
-
-        case 'RETO_2M':
-          if (['1', '2', '3'].includes(text)) {
-            await sendWhatsAppMessage(
-              from,
-              `Has seleccionado la opción ${text} del Reto $2M. Estamos consultando tus datos...\n\nEscribe 0 para volver al menú.`
-            );
-          } else {
-            await sendWhatsAppMessage(from, `Opción no válida. Por favor responde 1, 2, 3 o presiona 0 para volver al menú.`);
-          }
-          break;
-
-        case 'CADENAS':
-          if (['A', 'B', 'C'].includes(text)) {
-            await sendWhatsAppMessage(
-              from,
-              `Solicitud enviada para Cadenas de Ahorro (Opción ${text}). Te daremos respuesta a la brevedad.\n\nEscribe 0 para volver al menú.`
-            );
-          } else {
-            await sendWhatsAppMessage(from, `Opción no válida. Por favor responde A, B, C o presiona 0 para volver al menú.`);
-          }
-          break;
-
-        default:
-          userSessions[from] = 'MAIN';
-          await sendWhatsAppMessage(from, MAIN_MENU);
-          break;
+        await sendWhatsAppMessage(
+          from,
+          `🎉 *¡Pedido Registrado con Éxito!*\n\n` +
+          `📋 *Detalles de tu orden:*\n` +
+          `• Cantidad: ${qty} Sticker(s)\n` +
+          `• Valor total: *$${totalAmount} COP*\n\n` +
+          `🏷 *Tus Códigos Reservados:*\n` +
+          `${codeListText}\n\n` +
+          `_(Si alguno de tus códigos es el **STK-100**, ¡ganas los **$140.000 COP** en efectivo!)_\n\n` +
+          `🔑 *Medio de Pago (Bre-B):*\n` +
+          `Transferencia a la *Llave Bre-B: 0093393998*\n\n` +
+          `📲 *Paso final:* Envíanos la captura o foto del comprobante de pago por este chat.\n` +
+          `Verificaremos la transacción y confirmaremos la activación de tus códigos.\n\n` +
+          `Escribe *0* para regresar al menú principal.`
+        );
+      } else if (text === '4') {
+        await sendWhatsAppMessage(
+          from,
+          `🎨 *Pedido Personalizado de Stickers*\n\n` +
+          `Escríbenos cuántos stickers deseas encargar y un asesor te informará la disponibilidad y tus códigos asignados.\n\n` +
+          `🔑 *Llave Bre-B:* 0093393998\n\n` +
+          `Escribe *0* para regresar al menú.`
+        );
+      } else if (text === '5') {
+        await sendWhatsAppMessage(
+          from,
+          `👤 *Atención Personalizada Llanix*\n\n` +
+          `Déjanos tu mensaje y un asesor responderá tus dudas en breve por este chat.\n\n` +
+          `_(Escribe 0 para regresar al menú principal)_`
+        );
+      } else {
+        await sendWhatsAppMessage(from, MAIN_MENU);
       }
     }
     res.sendStatus(200);
@@ -240,5 +150,5 @@ app.post('/webhook', async (req, res) => {
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+  console.log(`Servidor de Stickers Llanix corriendo en puerto ${PORT}`);
 });
