@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'llanix_secure_token_2026';
+const VERIFY_TOKEN = 'llanix_secure_token_2026';
 
 // Ruta de prueba
 app.get('/', (req, res) => {
