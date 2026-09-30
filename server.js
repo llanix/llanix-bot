@@ -7,9 +7,8 @@ const app = express();
 // CONFIGURACIÓN DEL SERVIDOR
 // ======================================================
 
-app.use(express.json({
-  limit: '10mb'
-}));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
@@ -18,15 +17,15 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'llanix_verify_token';
 const PORT = process.env.PORT || 8080;
 
 // ======================================================
-// ESTADO TEMPORAL
+// ESTADO TEMPORAL Y REGISTRO DE PAGOS
 // ======================================================
 
 const userSessions = {};
-let stickerCounter = 0;
+let contadorPagosConfirmados = 0; // Orden de llegada oficial (1, 2, 3...)
 const comprobantesRecibidos = [];
 
 // ======================================================
-// RUTA PRINCIPAL
+// RUTAS PRINCIPALES
 // ======================================================
 
 app.get('/', (req, res) => {
@@ -37,36 +36,20 @@ app.get('/', (req, res) => {
       <meta charset="UTF-8">
       <title>Llanix Bot</title>
       <style>
-        body {
-          font-family: Arial, sans-serif;
-          background: #121212;
-          color: white;
-          text-align: center;
-          padding: 50px;
-        }
-        .ok {
-          color: #00e676;
-          font-size: 28px;
-          font-weight: bold;
-        }
-        a {
-          color: #29b6f6;
-        }
+        body { font-family: Arial, sans-serif; background: #121212; color: white; text-align: center; padding: 50px; }
+        .ok { color: #00e676; font-size: 28px; font-weight: bold; }
+        a { color: #29b6f6; text-decoration: none; font-size: 18px; margin: 10px; display: inline-block; }
       </style>
     </head>
     <body>
       <div class="ok">🤖 Llanix Bot funcionando</div>
       <p>Servidor conectado y ejecutándose correctamente en Railway.</p>
       <p><a href="/estado">🔎 Ver estado del sistema</a></p>
-      <p><a href="/comprobantes">📸 Ver comprobantes</a></p>
+      <p><a href="/comprobantes">📸 Panel de Comprobantes</a></p>
     </body>
     </html>
   `);
 });
-
-// ======================================================
-// RUTA DE ESTADO
-// ======================================================
 
 app.get('/estado', (req, res) => {
   res.status(200).json({
@@ -74,36 +57,21 @@ app.get('/estado', (req, res) => {
     estado: 'activo',
     whatsapp_token_configurado: !!WHATSAPP_TOKEN,
     phone_number_id_configurado: !!PHONE_NUMBER_ID,
-    verify_token_configurado: !!VERIFY_TOKEN,
-    webhook: '/webhook',
-    stickers_generados: stickerCounter,
-    comprobantes_en_memoria: comprobantesRecibidos.length,
-    hora_servidor: new Date().toLocaleString('es-CO', {
-      timeZone: 'America/Bogota'
-    })
+    comprobantes_registrados: comprobantesRecibidos.length,
+    pagos_confirmados: contadorPagosConfirmados,
+    hora_servidor: new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' })
   });
 });
 
 // ======================================================
-// FUNCIÓN PARA ENVIAR MENSAJES A WHATSAPP
+// FUNCIÓN PARA ENVIAR MENSAJES DE WHATSAPP
 // ======================================================
 
 async function sendWhatsAppMessage(to, text) {
-  if (!to) {
-    console.error('❌ Error: No existe número de destinatario.');
-    return false;
-  }
-  if (!PHONE_NUMBER_ID) {
-    console.error('❌ Error: Falta PHONE_NUMBER_ID.');
-    return false;
-  }
-  if (!WHATSAPP_TOKEN) {
-    console.error('❌ Error: Falta WHATSAPP_TOKEN.');
-    return false;
-  }
+  if (!to || !PHONE_NUMBER_ID || !WHATSAPP_TOKEN) return false;
 
   try {
-    const response = await axios({
+    await axios({
       method: 'POST',
       url: `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
       headers: {
@@ -117,17 +85,10 @@ async function sendWhatsAppMessage(to, text) {
         text: { body: text }
       }
     });
-
-    console.log('✅ Mensaje enviado correctamente a:', to);
+    console.log('✅ Mensaje enviado a:', to);
     return true;
   } catch (error) {
-    console.error('❌ ERROR ENVIANDO MENSAJE A WHATSAPP');
-    if (error.response) {
-      console.error('Código:', error.response.status);
-      console.error('Respuesta de Meta:', JSON.stringify(error.response.data, null, 2));
-    } else {
-      console.error('Mensaje:', error.message);
-    }
+    console.error('❌ Error enviando mensaje a WhatsApp:', error.response ? error.response.data : error.message);
     return false;
   }
 }
@@ -140,7 +101,7 @@ const MAIN_MENU =
 `¡Hola! Bienvenid@ a Llanix 🎨
 
 🏆 *¡Gran Dinámica de Stickers Llanix!*
-Cada sticker incluye un *código único de registro*. 
+Tu código de Sticker se asigna *al verificar tu pago* según el orden exacto de llegada.
 El comprador que obtenga el registro *#100 (STK-100)* ganará el premio acumulado de la categoría 💵.
 
 ¿Qué categoría deseas adquirir hoy?
@@ -153,69 +114,41 @@ El comprador que obtenga el registro *#100 (STK-100)* ganará el premio acumulad
 Responde con el número de la opción (1, 2, 3, 4 o 5).`;
 
 // ======================================================
-// WEBHOOK DE VERIFICACIÓN DE META
+// WEBHOOKS DE META
 // ======================================================
 
 app.get('/webhook', (req, res) => {
-  console.log('========================================');
-  console.log('🔐 META ESTÁ INTENTANDO VERIFICAR WEBHOOK');
-  console.log('========================================');
-
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
   if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-    console.log('✅ WEBHOOK_VERIFIED');
     return res.status(200).send(challenge);
   }
-
-  console.error('❌ ERROR DE VERIFICACIÓN DEL WEBHOOK');
   return res.sendStatus(403);
 });
-
-// ======================================================
-// WEBHOOK DE MENSAJES DE WHATSAPP
-// ======================================================
 
 app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
-
-    if (!body || !body.object || !body.entry || !Array.isArray(body.entry) || body.entry.length === 0) {
+    if (!body || !body.object || !body.entry || !body.entry[0].changes || !body.entry[0].changes[0].value.messages) {
       return res.sendStatus(200);
     }
 
-    const entry = body.entry[0];
-    if (!entry.changes || !Array.isArray(entry.changes) || entry.changes.length === 0) {
-      return res.sendStatus(200);
-    }
-
-    const value = entry.changes[0].value;
-    if (!value || !value.messages || !Array.isArray(value.messages) || value.messages.length === 0) {
-      return res.sendStatus(200);
-    }
-
-    const message = value.messages[0];
+    const message = body.entry[0].changes[0].value.messages[0];
     const from = message.from;
-
     if (!from) return res.sendStatus(200);
 
     // --- MENSAJE DE TEXTO ---
     if (message.type === 'text' && message.text) {
       const text = (message.text.body || '').trim().toUpperCase();
 
-      if (!userSessions[from]) {
-        userSessions[from] = 'NEW';
-      }
-
-      if (['0', 'MENU', 'HOLA', 'INICIO', 'STICKERS'].includes(text)) {
-        userSessions[from] = 'MAIN';
+      if (['0', 'MENU', 'HOLA', 'INICIO', 'STICKERS'].includes(text) || !userSessions[from]) {
+        userSessions[from] = { step: 'MAIN' };
         await sendWhatsAppMessage(from, MAIN_MENU);
         return res.sendStatus(200);
       }
 
-      // Procesamiento de categorías de stickers
       let precio = 0;
       let nombreOpcion = '';
 
@@ -226,26 +159,25 @@ app.post('/webhook', async (req, res) => {
       else if (text === '5') { precio = 12000; nombreOpcion = 'Sticker VIP'; }
 
       if (precio > 0) {
-        stickerCounter = (stickerCounter % 100) + 1;
-        const formattedCode = `STK-${String(stickerCounter).padStart(3, '0')}`;
         const totalAmount = precio.toLocaleString('es-CO');
 
-        userSessions[from] = 'PAYMENT';
+        userSessions[from] = {
+          step: 'PAYMENT',
+          categoria: nombreOpcion,
+          precio: totalAmount
+        };
 
         await sendWhatsAppMessage(
           from,
-          `🎉 *¡Pedido Registrado con Éxito!*\n\n` +
-          `📋 *Detalles de tu orden:*\n` +
+          `🎉 *¡Solicitud Registrada con Éxito!*\n\n` +
+          `📋 *Detalles de tu solicitud:*\n` +
           `- Opción: ${nombreOpcion}\n` +
-          `- Valor total: *$${totalAmount} COP*\n\n` +
-          `🏷 *Tu Código Reservado:*\n` +
-          `• *${formattedCode}*\n\n` +
-          `*(Si tu código es el **STK-100**, ¡ganas el premio acumulado!)*\n\n` +
+          `- Valor a transferir: *$${totalAmount} COP*\n\n` +
           `🔑 *Medio de Pago (Bre-B):*\n` +
           `Transferencia a la *Llave Bre-B: 0093393998*\n\n` +
           `📲 *Paso final:*\n` +
           `Envíanos la captura o foto del comprobante de pago por este chat.\n\n` +
-          `Verificaremos la transacción y confirmaremos la activación de tu código.\n\n` +
+          `⚠️ *Nota importante:* Tu código de Sticker (Ej: STK-001, STK-002...) se asignará oficialmente *al momento de verificar la acreditación de tu pago* según el orden de llegada.\n\n` +
           `Escribe *0* para regresar al menú principal.`
         );
         return res.sendStatus(200);
@@ -255,43 +187,39 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // --- MENSAJE DE IMAGEN (COMPROBANTE) ---
+    // --- RECEPCIÓN DE COMPROBANTE DE PAGO ---
     if (message.type === 'image' && message.image) {
-      const mediaId = message.image.id;
-      const fechaHora = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' });
+      const session = userSessions[from] || {};
+      const idUnico = Date.now().toString();
 
       comprobantesRecibidos.push({
+        id: idUnico,
         from: from,
-        mediaId: mediaId,
-        fecha: fechaHora,
-        messageId: message.id || null
+        mediaId: message.image.id,
+        categoria: session.categoria || 'Sticker Llanix',
+        precio: session.precio || 'N/A',
+        fechaEnvio: new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' }),
+        estado: 'PENDIENTE'
       });
-
-      console.log(`🚨 Comprobante guardado | Cliente: +${from} | Media ID: ${mediaId}`);
 
       await sendWhatsAppMessage(
         from,
-        `📩 *¡Comprobante de pago recibido con éxito!*\n\n` +
-        `Nuestro equipo verificará el ingreso en la cuenta Bre-B en breve y te confirmaremos la activación de tus códigos STK.\n\n` +
-        `¡Gracias por comprar en Llanix!`
+        `📩 *¡Comprobante de pago recibido!*\n\n` +
+        `Estamos verificando tu transferencia en la cuenta Bre-B.\n` +
+        `Tan pronto confirmemos el ingreso del dinero, recibirás tu *Sticker Digital Oficial* sellado con tu código de orden asignado y hora exacta de confirmación.`
       );
       return res.sendStatus(200);
     }
 
-    await sendWhatsAppMessage(
-      from,
-      `📩 Hemos recibido tu mensaje.\nPor favor envíanos un mensaje de texto o una imagen del comprobante de pago.\n\nEscribe *0* para regresar al menú principal.`
-    );
     return res.sendStatus(200);
-
-  } catch (globalError) {
-    console.error('❌ ERROR PROCESANDO WEBHOOK:', globalError.stack || globalError.message);
+  } catch (error) {
+    console.error('❌ Error en el webhook:', error);
     return res.sendStatus(200);
   }
 });
 
 // ======================================================
-// PANEL DE COMPROBANTES
+// PANEL DE CONTROL Y AUTORIZACIÓN
 // ======================================================
 
 app.get('/comprobantes', (req, res) => {
@@ -301,33 +229,45 @@ app.get('/comprobantes', (req, res) => {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Comprobantes Llanix</title>
+      <title>Panel de Autorizaciones - Llanix</title>
       <style>
         body { font-family: Arial, sans-serif; background: #121212; color: #fff; padding: 20px; }
         h1 { color: #00e676; }
         .card { background: #1e1e1e; border: 1px solid #333; padding: 15px; margin-bottom: 15px; border-radius: 8px; }
-        .badge { background: #00e676; color: #000; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
-        a { color: #29b6f6; text-decoration: none; }
-        .empty { color: #aaa; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; }
+        .PENDIENTE { background: #ff9800; color: #000; }
+        .APROBADO { background: #00e676; color: #000; }
+        a.btn { background: #29b6f6; color: #000; padding: 8px 12px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block; margin-top: 5px; }
+        button.btn-autorizar { background: #00e676; color: #000; border: none; padding: 10px 15px; font-weight: bold; border-radius: 4px; cursor: pointer; margin-top: 10px; font-size: 15px; }
       </style>
     </head>
     <body>
-      <h1>📸 Comprobantes Recibidos - Llanix Bot</h1>
-      <p>Página de verificación manual de transferencias Bre-B.</p>
+      <h1>📸 Panel de Control de Comprobantes - Llanix</h1>
+      <p>Revisa la transferencia Bre-B. Al presionar 'Aprobar Pago', se asignará automáticamente el código de orden consecutivo al cliente.</p>
       <hr>
   `;
 
   if (comprobantesRecibidos.length === 0) {
-    html += `<p class="empty">No hay comprobantes pendientes por verificar.</p>`;
+    html += `<p style="color:#aaa;">No hay comprobantes registrados por el momento.</p>`;
   } else {
-    comprobantesRecibidos.slice().reverse().forEach((item, index) => {
+    comprobantesRecibidos.slice().reverse().forEach((item) => {
       html += `
         <div class="card">
-          <p><span class="badge">#${comprobantesRecibidos.length - index}</span> 📱 <strong>Cliente:</strong> +${item.from}</p>
-          <p>⏰ <strong>Hora:</strong> ${item.fecha}</p>
-          <p>🆔 <strong>Media ID:</strong> ${item.mediaId}</p>
-          <p>📨 <strong>Message ID:</strong> ${item.messageId || 'No disponible'}</p>
-          <p>🖼️ <strong>Foto del pago:</strong> <a href="/ver-imagen/${item.mediaId}" target="_blank">Abrir comprobante</a></p>
+          <p>📱 <strong>Cliente:</strong> +${item.from}</p>
+          <p>🏷 <strong>Categoría:</strong> ${item.categoria} ($${item.precio} COP)</p>
+          <p>⏰ <strong>Hora de recepción del comprobante:</strong> ${item.fechaEnvio}</p>
+          <p>📌 <strong>Estado:</strong> <span class="badge ${item.estado}">${item.estado}</span></p>
+          
+          ${item.codigoAsignado ? `<p>🥇 <strong>Código Asignado Oficial:</strong> <span style="font-size:20px; color:#00e676; font-weight:bold;">${item.codigoAsignado}</span></p>` : ''}
+          
+          <p>🖼️ <strong>Imagen:</strong> <a class="btn" href="/ver-imagen/${item.mediaId}" target="_blank">Ver Comprobante de Pago</a></p>
+          
+          ${item.estado === 'PENDIENTE' ? `
+            <form action="/autorizar" method="POST">
+              <input type="hidden" name="id" value="${item.id}">
+              <button type="submit" class="btn-autorizar">✅ Aprobar Pago y Asignar Código Oficial</button>
+            </form>
+          ` : `<p style="color:#00e676;">✨ ¡Pago verificado! Sticker expedido el ${item.fechaAprobacion}</p>`}
         </div>
       `;
     });
@@ -338,6 +278,48 @@ app.get('/comprobantes', (req, res) => {
 });
 
 // ======================================================
+// RUTA DE AUTORIZACIÓN Y ASIGNACIÓN DEL CÓDIGO
+// ======================================================
+
+app.post('/autorizar', async (req, res) => {
+  const { id } = req.body;
+  const item = comprobantesRecibidos.find(c => c.id === id);
+
+  if (item && item.estado === 'PENDIENTE') {
+    // Incrementar el contador global de pagos autorizados
+    contadorPagosConfirmados = (contadorPagosConfirmados % 100) + 1;
+    
+    // Asignación de código oficial estrictamente al verificar el pago
+    const codigoGenerado = `STK-${String(contadorPagosConfirmados).padStart(3, '0')}`;
+    
+    item.estado = 'APROBADO';
+    item.codigoAsignado = codigoGenerado;
+    item.ordenLlegada = contadorPagosConfirmados;
+    item.fechaAprobacion = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' });
+
+    // Mensaje de Formato Sticker/Certificado Digital oficial enviada al cliente
+    const stickerMensaje = 
+      `🎨 *==============================*\n` +
+      `🏅 *STICKER DIGITAL OFICIAL LLANIX* 🏅\n` +
+      `*==============================*\n\n` +
+      `✅ *ESTADO:* PAGO VERIFICADO Y CONFIRMADO\n\n` +
+      `🆔 *CÓDIGO ASIGNADO:* *${codigoGenerado}*\n` +
+      `🥇 *ORDEN DE LLEGADA:* Pago #${contadorPagosConfirmados}\n` +
+      `📦 *CATEGORÍA:* ${item.categoria}\n` +
+      `⏰ *FECHA Y HORA DE VERIFICACIÓN:*\n` +
+      `_${item.fechaAprobacion}_\n\n` +
+      `----------------------------------\n` +
+      `🏆 *RECORDATORIO DE LA DINÁMICA:*\n` +
+      `Guarda este mensaje como tu comprobante oficial. Si tu código asignado es el **STK-100**, ¡ganas automáticamente el premio acumulado!\n\n` +
+      `¡Gracias por tu compra y mucha suerte! 🚀`;
+
+    await sendWhatsAppMessage(item.from, stickerMensaje);
+  }
+
+  res.redirect('/comprobantes');
+});
+
+// ======================================================
 // MOSTRAR IMAGEN DE META
 // ======================================================
 
@@ -345,9 +327,7 @@ app.get('/ver-imagen/:mediaId', async (req, res) => {
   try {
     const { mediaId } = req.params;
 
-    if (!WHATSAPP_TOKEN) {
-      return res.status(500).send('WHATSAPP_TOKEN no configurado.');
-    }
+    if (!WHATSAPP_TOKEN) return res.status(500).send('WHATSAPP_TOKEN no configurado.');
 
     const mediaRes = await axios.get(
       `https://graph.facebook.com/v20.0/${mediaId}`,
@@ -365,8 +345,8 @@ app.get('/ver-imagen/:mediaId', async (req, res) => {
     res.contentType(mediaRes.data.mime_type || 'image/jpeg');
     res.send(Buffer.from(imageBuffer.data));
   } catch (error) {
-    console.error('❌ Error al cargar imagen desde Meta:', error.message);
-    res.status(500).send('Error al cargar la imagen del comprobante.');
+    console.error('❌ Error cargando imagen:', error.message);
+    res.status(500).send('Error al cargar la imagen.');
   }
 });
 
@@ -375,7 +355,5 @@ app.get('/ver-imagen/:mediaId', async (req, res) => {
 // ======================================================
 
 app.listen(PORT, () => {
-  console.log('========================================');
-  console.log('🤖 LLANIX BOT INICIADO EN PUERTO:', PORT);
-  console.log('========================================');
+  console.log('🤖 LLANIX BOT CORRIENDO EN EL PUERTO:', PORT);
 });
