@@ -25,11 +25,11 @@ let contadorStickers = 0; // Orden de llegada oficial Stickers (1 al 100)
 let contadorMesas = 100;   // Generador de códigos MESA-101, MESA-102...
 
 const comprobantesRecibidos = [];
-const usuariosAhorro = {}; // Registro de saldo para Ahorro Libre y Reto 2M
+const usuariosAhorro = {}; // Registro de saldo por número de teléfono para Ahorro Libre y Reto 2M
 const mesasCadenas = {};   // Estructura de Mesas Activas
 
 // ======================================================
-// RUTAS PRINCIPALES
+// RUTAS PRINCIPALES Y PANEL
 // ======================================================
 
 app.get('/', (req, res) => {
@@ -47,9 +47,9 @@ app.get('/', (req, res) => {
     </head>
     <body>
       <div class="ok">🤖 Sistema Multi-Módulo Llanix Funcionando</div>
-      <p>Servidor conectado y ejecutándose correctamente.</p>
+      <p>Servidor activo y listo para procesar comprobantes y retiros.</p>
       <p><a href="/estado">🔎 Ver Estado del Sistema</a></p>
-      <p><a href="/comprobantes">📸 Panel de Control de Comprobantes</a></p>
+      <p><a href="/comprobantes">📸 Panel de Control de Comprobantes y Retiros</a></p>
     </body>
     </html>
   `);
@@ -99,7 +99,7 @@ async function sendWhatsAppMessage(to, text) {
 }
 
 // ======================================================
-// TEXTOS DE MENÚS Y PLANTILLAS
+// MENÚS Y TEXTOS
 // ======================================================
 
 const MAIN_MENU = 
@@ -118,6 +118,8 @@ Por favor selecciona el servicio o dinámica en la que deseas participar:
 
 4️⃣ *Cadenas Semanales (Mesas Llanix)* 🔄
    _Ahorro grupal de 4 turnos ($10.000 semanales)._
+
+💡 *Escribe "RETIRO" en cualquier momento para solicitar la liquidación de tu saldo.*
 
 Responde con el número de tu opción (1, 2, 3 o 4).`;
 
@@ -147,7 +149,7 @@ Selecciona una opción:
 Escribe *0* para volver al menú principal.`;
 
 // ======================================================
-// WEBHOOKS DE META
+// WEBHOOK DE META
 // ======================================================
 
 app.get('/webhook', (req, res) => {
@@ -178,14 +180,72 @@ app.post('/webhook', async (req, res) => {
     if (message.type === 'text' && message.text) {
       const text = (message.text.body || '').trim().toUpperCase();
 
-      // Reset / Menú Principal
+      // RESET / MENÚ PRINCIPAL
       if (['0', 'MENU', 'HOLA', 'INICIO'].includes(text)) {
         userSessions[from] = { step: 'MAIN' };
         await sendWhatsAppMessage(from, MAIN_MENU);
         return res.sendStatus(200);
       }
 
-      // Nivel 1: Selección del Menú Principal
+      // COMANDO DE RETIRO (VALIDACIÓN AUTOMÁTICA DE SALDO POR NÚMERO DE TELÉFONO)
+      if (['RETIRO', 'SOLICITAR RETIRO', 'RETIRAR'].includes(text)) {
+        const saldoActual = usuariosAhorro[from] || 0;
+
+        if (saldoActual < 20000) {
+          await sendWhatsAppMessage(
+            from,
+            `⚠️ *SOLICITUD DE RETIROS LLANIX*\n\n` +
+            `Tu saldo acumulado actual es de *$${saldoActual.toLocaleString('es-CO')} COP*.\n\n` +
+            `📌 *Regla de Retiro:* Recuerda que los retiros están habilitados únicamente para saldos acumulados de **mínimo $20.000 COP**.\n\n` +
+            `Escribe *0* para regresar al menú principal.`
+          );
+          return res.sendStatus(200);
+        }
+
+        const montoNeto = saldoActual - 3000;
+        userSessions[from] = { step: 'WAITING_RETIRO_DATA', saldoTotal: saldoActual, netoARecibir: montoNeto };
+
+        await sendWhatsAppMessage(
+          from,
+          `🏦 *SOLICITUD DE RETIRO DE SALDO*\n\n` +
+          `📊 *Saldo Acumulado:* $${saldoActual.toLocaleString('es-CO')} COP\n` +
+          `➖ *Fee de administración:* $3.000 COP\n` +
+          `💵 *Monto Neto a Recibir:* *$${montoNeto.toLocaleString('es-CO')} COP*\n\n` +
+          `📝 *Paso final:* Por favor responde a este mensaje enviando tus datos bancarios:\n` +
+          `- Nombre completo\n` +
+          `- Cédula\n` +
+          `- Llave Bre-B o Nequi/DaviPlata`
+        );
+        return res.sendStatus(200);
+      }
+
+      // RECEPCIÓN DE DATOS DE RETIRO
+      if (session.step === 'WAITING_RETIRO_DATA') {
+        comprobantesRecibidos.push({
+          id: Date.now().toString(),
+          from: from,
+          modulo: 'SOLICITUD_RETIRO',
+          datosTransferencia: text,
+          saldoActual: session.saldoTotal,
+          montoNeto: session.netoARecibir,
+          fechaEnvio: new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' }),
+          estado: 'PENDIENTE'
+        });
+
+        // Limpia el saldo del usuario en memoria para evitar dobles retiros
+        usuariosAhorro[from] = 0;
+        userSessions[from] = { step: 'MAIN' };
+
+        await sendWhatsAppMessage(
+          from,
+          `✅ *¡Solicitud de Retiro Registrada!*\n\n` +
+          `El administrador verificará tu solicitud y efectuará la transferencia a la llave/cuenta proporcionada.\n` +
+          `Recibirás la confirmación de desembolso por este medio.`
+        );
+        return res.sendStatus(200);
+      }
+
+      // SELECCIÓN DEL MENÚ PRINCIPAL
       if (session.step === 'MAIN') {
         if (text === '1') {
           userSessions[from] = { step: 'STICKERS_SELECT' };
@@ -231,7 +291,7 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
-      // Nivel 2: Módulo 1 (Stickers)
+      // SELECCIÓN MÓDULO 1 (STICKERS)
       if (session.step === 'STICKERS_SELECT') {
         let precio = 0;
         let nombreOpcion = '';
@@ -258,7 +318,7 @@ app.post('/webhook', async (req, res) => {
         }
       }
 
-      // Nivel 2: Módulo 4 (Cadenas)
+      // SELECCIÓN MÓDULO 4 (CADENAS)
       if (session.step === 'CADENAS_SELECT') {
         if (text === '1') {
           userSessions[from] = { step: 'WAITING_PROOF', modulo: 'CADENAS_GESTOR' };
@@ -283,7 +343,7 @@ app.post('/webhook', async (req, res) => {
         }
       }
 
-      // Nivel 3: Ingreso de Código de Mesa para Invitados
+      // INGRESO CÓDIGO DE MESA
       if (session.step === 'WAITING_MESA_CODE') {
         const codigoMesa = text;
         if (mesasCadenas[codigoMesa]) {
@@ -296,7 +356,7 @@ app.post('/webhook', async (req, res) => {
         } else {
           await sendWhatsAppMessage(
             from,
-            `❌ El código de mesa *${codigoMesa}* no existe o aún no ha sido activado por el Administrador. Verifica con tu Gestor o escribe *0* para salir.`
+            `❌ El código de mesa *${codigoMesa}* no existe o aún no ha sido activado. Verifica con tu Gestor o escribe *0* para salir.`
           );
         }
         return res.sendStatus(200);
@@ -327,10 +387,9 @@ app.post('/webhook', async (req, res) => {
         from,
         `📩 *¡Comprobante recibido exitosamente!*\n\n` +
         `Estamos verificando la acreditación en la cuenta Bre-B.\n` +
-        `Tan pronto el pago sea validado en el sistema, recibirás la confirmación y certificado oficial correspondiente a tu solicitud.`
+        `Tan pronto el pago sea validado en el sistema, recibirás la confirmación oficial.`
       );
-      
-      // Resetea sesión al estado principal
+
       userSessions[from] = { step: 'MAIN' };
       return res.sendStatus(200);
     }
@@ -373,19 +432,25 @@ app.get('/comprobantes', (req, res) => {
   `;
 
   if (comprobantesRecibidos.length === 0) {
-    html += `<p style="color:#aaa;">No hay comprobantes pendientes por revisar.</p>`;
+    html += `<p style="color:#aaa;">No hay solicitudes pendientes.</p>`;
   } else {
     comprobantesRecibidos.slice().reverse().forEach((item) => {
       html += `
         <div class="card">
           <p>📱 <strong>Cliente:</strong> +${item.from}</p>
-          <p>🧩 <strong>Módulo:</strong> <span style="color:#29b6f6; font-weight:bold;">${item.modulo}</span></p>
+          <p>🧩 <strong>Operación:</strong> <span style="color:#29b6f6; font-weight:bold;">${item.modulo}</span></p>
+
+          ${item.modulo === 'SOLICITUD_RETIRO' ? `
+            <p>🏦 <strong>Datos de Transferencia:</strong> ${item.datosTransferencia}</p>             <p>💰 <strong>Monto Saldo:</strong> $${item.saldoActual.toLocaleString('es-CO')} COP</p>
+            <p>💵 <strong>Neto a Desembolsar (-$3k Fee):</strong> <span style="color:#00e676; font-size:18px; font-weight:bold;">$${item.montoNeto.toLocaleString('es-CO')} COP</span></p>
+          ` : ''}
+
           ${item.categoria !== 'N/A' ? `<p>🏷️ <strong>Categoría:</strong> ${item.categoria}</p>` : ''}
           ${item.codigoMesa !== 'N/A' ? `<p>🔑 <strong>Código Mesa:</strong> ${item.codigoMesa}</p>` : ''}
           <p>⏰ <strong>Recibido:</strong> ${item.fechaEnvio}</p>
           <p>📌 <strong>Estado:</strong> <span class="badge ${item.estado}">${item.estado}</span></p>
 
-          <p>🖼️️ <a class="btn" href="/ver-imagen/${item.mediaId}" target="_blank">Ver Comprobante de Pago</a></p>
+          ${item.mediaId ? `<p>🖼 <a class="btn" href="/ver-imagen/${item.mediaId}" target="_blank">Ver Comprobante de Pago</a></p>` : ''}
 
           ${item.estado === 'PENDIENTE' ? `
             <form action="/autorizar" method="POST">
@@ -396,9 +461,11 @@ app.get('/comprobantes', (req, res) => {
                 <input type="number" name="montoAbono" placeholder="Ej: 50000" required></p>
               ` : ''}
 
-              <button type="submit" class="btn-autorizar">✅ Aprobar Pago y Notificar al Cliente</button>
+              <button type="submit" class="btn-autorizar">
+                ${item.modulo === 'SOLICITUD_RETIRO' ? '✅ Confirmar Desembolso Realizado' : '✅ Aprobar Pago y Notificar al Cliente'}
+              </button>
             </form>
-          ` : `<p style="color:#00e676;">✨ Pago verificado el ${item.fechaAprobacion}</p>`}
+          ` : `<p style="color:#00e676;">✨ Operación procesada el ${item.fechaAprobacion}</p>`}
         </div>
       `;
     });
@@ -409,7 +476,7 @@ app.get('/comprobantes', (req, res) => {
 });
 
 // ======================================================
-// RUTA DE AUTORIZACIÓN Y LIQUIDACIÓN POR MÓDULO
+// RUTA DE AUTORIZACIÓN
 // ======================================================
 
 app.post('/autorizar', async (req, res) => {
@@ -421,8 +488,20 @@ app.post('/autorizar', async (req, res) => {
     item.fechaAprobacion = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' });
     const valorAbono = parseInt(montoAbono) || item.precio || 0;
 
-    // --- LÓGICA MÓDULO 1: STICKERS ---
-    if (item.modulo === 'STICKERS') {
+    if (item.modulo === 'SOLICITUD_RETIRO') {
+      const msg = 
+        `🏦 *==============================*\n` +
+        `💸 *CONFIRMACIÓN DE DESEMBOLSO* 💸\n` +
+        `*==============================*\n\n` +
+        `✅ *TRANSFERENCIA REALIZADA EXITOSAMENTE*\n\n` +
+        `💵 *Monto Enviado:* $${item.montoNeto.toLocaleString('es-CO')} COP\n` +
+        `➖ *Fee de administración:* $3.000 COP\n\n` +
+        `¡Gracias por confiar en Llanix! Tu retiro ha sido completado. 🚀`;
+
+      await sendWhatsAppMessage(item.from, msg);
+    }
+
+    else if (item.modulo === 'STICKERS') {
       contadorStickers = (contadorStickers % 100) + 1;
       const codigoGenerado = `STK-${String(contadorStickers).padStart(3, '0')}`;
 
@@ -439,7 +518,6 @@ app.post('/autorizar', async (req, res) => {
       await sendWhatsAppMessage(item.from, msg);
     }
 
-    // --- LÓGICA MÓDULO 2: AHORRO LIBRE ---
     else if (item.modulo === 'AHORRO_LIBRE') {
       usuariosAhorro[item.from] = (usuariosAhorro[item.from] || 0) + valorAbono;
       const totalAcumulado = usuariosAhorro[item.from];
@@ -454,12 +532,11 @@ app.post('/autorizar', async (req, res) => {
         `📊 *Saldo Acumulado:* *$${totalAcumulado.toLocaleString('es-CO')} COP*\n` +
         `📄 *Referencia:* \`${refAbono}\`\n\n` +
         `----------------------------------\n` +
-        `⚠️ *Recordatorio de Retiro:* Habilitado a partir de *$20.000 COP* de saldo acumulado. Aplica un fee de administración de *$3.000 COP* al momento del retiro.`;
+        `⚠️ *Recordatorio de Retiro:* Habilitado a partir de *$20.000 COP* de saldo acumulado. Aplica un fee de administración de *$3.000 COP* al solicitar tu retiro (escribe **RETIRO**).`;
 
       await sendWhatsAppMessage(item.from, msg);
     }
 
-    // --- LÓGICA MÓDULO 3: RETO 2 MILLONES ---
     else if (item.modulo === 'RETO_2M') {
       usuariosAhorro[item.from] = (usuariosAhorro[item.from] || 0) + valorAbono;
       const saldoActual = usuariosAhorro[item.from];
@@ -480,12 +557,11 @@ app.post('/autorizar', async (req, res) => {
         `🔥 *TU PLAN DE VICTORIA:*\n` +
         `¡Mantén el impulso! Si continúas con aportes de *$${valorAbono.toLocaleString('es-CO')} COP*, estarás a solo *${cuotasRestantes} cuotas* de completar tus *$2'000.000 COP*. ¡Tú puedes lograrlo! 💪\n\n` +
         `----------------------------------\n` +
-        `⚠️ *Recordatorio:* Al liquidar tu meta o en retiros anticipados (mínimo $20.000 COP), aplica el fee único de administración de $3.000 COP.`;
+        `⚠️ *Recordatorio:* Al liquidar tu meta o en retiros anticipados (mínimo $20.000 COP), aplica el fee de $3.000 COP.`;
 
       await sendWhatsAppMessage(item.from, msg);
     }
 
-    // --- LÓGICA MÓDULO 4: CADENAS (GESTOR) ---
     else if (item.modulo === 'CADENAS_GESTOR') {
       contadorMesas++;
       const codigoMesa = `MESA-${contadorMesas}`;
@@ -507,7 +583,6 @@ app.post('/autorizar', async (req, res) => {
       await sendWhatsAppMessage(item.from, msg);
     }
 
-    // --- LÓGICA MÓDULO 4: CADENAS (INVITADO) ---
     else if (item.modulo === 'CADENAS_INVITADO') {
       const codigoMesa = item.codigoMesa;
       const refCadena = `CDN-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -520,7 +595,7 @@ app.post('/autorizar', async (req, res) => {
 
       const msg = 
         `🔄 *==============================*\n` +
-        `🎟️️ *TIQUETE PAGO SEMANAL CADENA* 🎟️\n` +
+        `🎟 *TIQUETE PAGO SEMANAL CADENA* 🎟️\n` +
         `*==============================*\n\n` +
         `✅ *ESTADO:* PAZ Y SALVO 🟢\n\n` +
         `📄 *Referencia:* \`${refCadena}\`\n` +
@@ -537,7 +612,7 @@ app.post('/autorizar', async (req, res) => {
 });
 
 // ======================================================
-// VER IMAGEN DE META (COMPROBANTES)
+// VER IMAGEN DE META
 // ======================================================
 
 app.get('/ver-imagen/:mediaId', async (req, res) => {
