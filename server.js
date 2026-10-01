@@ -20,7 +20,48 @@ const comprobantesRecibidos = [];
 let contadorStickers = 0;
 
 // ======================================================
-// MENÚS Y TEXTOS (MÚLTIPLES UNIDADES Y AGILIDAD)
+// VALIDACIÓN DE HORARIO DE ATENCIÓN (2 PM - 5 PM | L-S)
+// ======================================================
+
+function esHorarioHabilitado() {
+  const ahora = new Date();
+  
+  // Convertir a hora de Colombia
+  const opciones = { timeZone: 'America/Bogota', hour12: false, weekday: 'short', hour: '2-digit', minute: '2-digit' };
+  const formatoCo = new Intl.DateTimeFormat('en-US', opciones).formatToParts(ahora);
+
+  let diaSemana = '';
+  let hora = 0;
+
+  formatoCo.forEach(part => {
+    if (part.type === 'weekday') diaSemana = part.value; // Sun, Mon, Tue...
+    if (part.type === 'hour') hora = parseInt(part.value, 10);
+  });
+
+  // Si es domingo, no está habilitado
+  if (diaSemana === 'Sun') return false;
+
+  // Habilitado de Lunes a Sábado entre las 14:00 (2 PM) y las 16:59 (5 PM)
+  if (hora >= 14 && hora < 17) {
+    return true;
+  }
+
+  return false;
+}
+
+const MENSAJE_FUERA_DE_HORARIO = 
+`🛑 *SISTEMA EN PAUSA FUERA DE HORARIO*
+
+Hola, actualmente la venta de Stickers Digitales se encuentra *cerrada*.
+
+⏰ *Horario de atención habilitado:*
+📅 **Lunes a Sábado**
+🕒 **2:00 PM a 5:00 PM (Hora Colombia)**
+
+Te invitamos a ingresar nuevamente dentro de esta ventana de tiempo para realizar tus compras y reservar tus casillas. ¡Gracias por tu comprensión! 🚀`;
+
+// ======================================================
+// MENÚS Y TEXTOS
 // ======================================================
 
 const MAIN_MENU = 
@@ -71,6 +112,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
       <div class="ok">🤖 Bot Llanix Activo (Módulo 1)</div>
+      <p>Horario Habilitado: Lunes a Sábado de 2:00 PM a 5:00 PM</p>
       <p><a href="/comprobantes">📸 Panel de Control de Comprobantes</a></p>
     </body>
     </html>
@@ -151,6 +193,12 @@ app.post('/webhook', async (req, res) => {
 
       if (session.step === 'MAIN') {
         if (text === '1') {
+          // VALIDACIÓN DE HORARIO AL ELEGIR MÓDULO 1
+          if (!esHorarioHabilitado()) {
+            await sendWhatsAppMessage(from, MENSAJE_FUERA_DE_HORARIO);
+            return res.sendStatus(200);
+          }
+
           userSessions[from] = { step: 'STICKERS_SELECT' };
           await sendWhatsAppMessage(from, MENU_STICKERS);
           return res.sendStatus(200);
@@ -162,6 +210,13 @@ app.post('/webhook', async (req, res) => {
 
       // SELECCIÓN DE CANTIDAD EN MÓDULO 1
       if (session.step === 'STICKERS_SELECT') {
+        // Doble validación por si la sesión quedó abierta
+        if (!esHorarioHabilitado()) {
+          userSessions[from] = { step: 'MAIN' };
+          await sendWhatsAppMessage(from, MENSAJE_FUERA_DE_HORARIO);
+          return res.sendStatus(200);
+        }
+
         let cantidad = 0;
         if (text === '1') cantidad = 1;
         else if (text === '2') cantidad = 2;
@@ -196,6 +251,11 @@ app.post('/webhook', async (req, res) => {
 
     // --- RECEPCIÓN DE IMÁGENES ---
     if (message.type === 'image' && message.image) {
+      if (!esHorarioHabilitado()) {
+        await sendWhatsAppMessage(from, MENSAJE_FUERA_DE_HORARIO);
+        return res.sendStatus(200);
+      }
+
       const idUnico = Date.now().toString();
 
       comprobantesRecibidos.unshift({
@@ -251,7 +311,7 @@ app.get('/comprobantes', (req, res) => {
       </style>
     </head>
     <body>
-      <h1>🎨 Panel Llanix (Solo Módulo 1 Activo)</h1>
+      <h1>🎨 Panel Llanix (Horario: L-S 2PM a 5PM)</h1>
       <hr>
   `;
 
