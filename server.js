@@ -20,31 +20,35 @@ const comprobantesRecibidos = [];
 let contadorStickers = 0;
 
 // ======================================================
-// MENÚS Y TEXTOS (MÓDULO 1 ÚNICO ACTIVO)
+// MENÚS Y TEXTOS (MÚLTIPLES UNIDADES Y AGILIDAD)
 // ======================================================
 
 const MAIN_MENU = 
 `¡Hola! Bienvenid@ a *Llanix* 🚀
 
-📌 *Aviso:* Actualmente los módulos de ahorro se encuentran en mantenimiento programado y se reactivarán muy pronto.
+📌 *Aviso:* Los módulos de ahorro se encuentran en mantenimiento programado.
 
-Por el momento, solo está disponible nuestro servicio activo:
+Actualmente tenemos activa nuestra dinámica de agilidad comercial:
 
-1️⃣ *Cliente #100 (Stickers Digitales)* 🎨
-   _Gana el acumulado de tu categoría al obtener la casilla #100._
+1️⃣ *Cliente #100 (Stickers Digitales - $2.000 COP c/u)* 🎨
+   _Adquiere tus Stickers Digitales por $2.000 COP. ¡El comprador que registre el número de orden 100 por estricto orden de llegada recibe la bonificación de **$140.000 COP**!_
+
+⚡ *¡Entre más rápido compren tus conocidos, más rápido se alcanza la casilla #100!*
+Puedes comprar la cantidad de stickers que desees para aumentar tus posibilidades y acelerar el conteo. ¡Comparte con tus familiares y amigos para cerrar la ronda más rápido! 🏃‍♂️💨
 
 Responde enviando el número *1* para continuar.`;
 
 const MENU_STICKERS = 
-`🎨 *MÓDULO 1: CLIENTE #100 (STICKERS LLANIX)*
-Tu código oficial se asigna *al verificar tu pago* por orden exacto de llegada. El registro *#100 (STK-100)* gana el pozo acumulado 💵.
+`🎨 *CLIENTE #100 - STICKER DIGITAL LLANIX*
 
-Selecciona la categoría que deseas adquirir:
-1️⃣ Sticker Básico ($2.000 COP) - Premio: $140.000
-2️⃣ Sticker Pro ($5.000 COP) - Premio: $350.000
-3️⃣ Sticker Silver ($8.000 COP) - Premio: $560.000
-4️⃣ Sticker Gold ($10.000 COP) - Premio: $700.000
-5️⃣ Sticker VIP ($12.000 COP) - Premio: $840.000
+Cada Sticker Básico tiene un costo de *$2.000 COP*.
+Tus números de orden se asignan *al verificar tu pago* por estricto orden de llegada. El cliente que registre la casilla *#100 (STK-100)* obtiene la bonificación de *$140.000 COP* 💵.
+
+Responde con la **cantidad de stickers** que deseas comprar:
+1️⃣ 1 Sticker ($2.000 COP)
+2️⃣ 2 Stickers ($4.000 COP)
+3️⃣ 5 Stickers ($10.000 COP)
+4️⃣ 10 Stickers ($20.000 COP)
 
 Escribe *0* para volver al menú principal.`;
 
@@ -138,7 +142,7 @@ app.post('/webhook', async (req, res) => {
       if (['RETIRO', 'SOLICITAR RETIRO', 'RETIRAR', '2', '3', '4'].includes(text) && session.step === 'MAIN') {
         await sendWhatsAppMessage(
           from,
-          `⚠️️ *MÓDULO EN MANTENIMIENTO*\n\n` +
+          `⚠️ *MÓDULO EN MANTENIMIENTO*\n\n` +
           `Los módulos de Ahorro y Cadenas no están disponibles en este momento mientras actualizamos el sistema.\n\n` +
           `Por favor selecciona la opción *1* para participar en *Cliente #100 (Stickers Digitales)*.`
         );
@@ -156,22 +160,31 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
+      // SELECCIÓN DE CANTIDAD EN MÓDULO 1
       if (session.step === 'STICKERS_SELECT') {
-        let precio = 0;
-        let nombreOpcion = '';
-        if (text === '1') { precio = 2000; nombreOpcion = 'Sticker Básico'; }
-        else if (text === '2') { precio = 5000; nombreOpcion = 'Sticker Pro'; }
-        else if (text === '3') { precio = 8000; nombreOpcion = 'Sticker Silver'; }
-        else if (text === '4') { precio = 10000; nombreOpcion = 'Sticker Gold'; }
-        else if (text === '5') { precio = 12000; nombreOpcion = 'Sticker VIP'; }
+        let cantidad = 0;
+        if (text === '1') cantidad = 1;
+        else if (text === '2') cantidad = 2;
+        else if (text === '3') cantidad = 5;
+        else if (text === '4') cantidad = 10;
 
-        if (precio > 0) {
-          userSessions[from] = { step: 'WAITING_PROOF', modulo: 'STICKERS', categoria: nombreOpcion, precio: precio };
+        if (cantidad > 0) {
+          const totalPagar = cantidad * 2000;
+          userSessions[from] = { 
+            step: 'WAITING_PROOF', 
+            modulo: 'STICKERS', 
+            categoria: `Sticker Básico x${cantidad}`, 
+            precio: totalPagar,
+            cantidad: cantidad
+          };
+
           await sendWhatsAppMessage(
             from,
-            `🎉 *Solicitud de ${nombreOpcion} ($${precio.toLocaleString('es-CO')} COP)*\n\n` +
+            `🎉 *Solicitud de ${cantidad} Sticker(s) Básico(s)*\n\n` +
+            `💵 *Total a transferir:* *$${totalPagar.toLocaleString('es-CO')} COP*\n` +
+            `⚡ *Casillas a reservar:* ${cantidad}\n\n` +
             `Transfiere a la **Llave Bre-B: 0093393998**.\n\n` +
-            `📸 *Envía la captura del comprobante por este chat para asignarte tu casilla.*`
+            `📸 *Envía la captura del comprobante por este chat para asignarte tus números de llegada.*`
           );
           return res.sendStatus(200);
         }
@@ -190,8 +203,9 @@ app.post('/webhook', async (req, res) => {
         from: from,
         mediaId: message.image.id,
         modulo: 'STICKERS',
-        categoria: session.categoria || 'N/A',
-        precio: session.precio || 0,
+        categoria: session.categoria || 'Sticker Básico x1',
+        precio: session.precio || 2000,
+        cantidad: session.cantidad || 1,
         fechaEnvio: new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' }),
         estado: 'PENDIENTE'
       });
@@ -200,7 +214,7 @@ app.post('/webhook', async (req, res) => {
         from,
         `📩 *¡Comprobante recibido exitosamente!*\n\n` +
         `Estamos verificando la acreditación en la cuenta Bre-B.\n` +
-        `Una vez verificado, recibirás la confirmación oficial y tu casilla asignada.`
+        `Una vez verificado, recibirás la confirmación oficial y tus números de llegada asignados.`
       );
 
       userSessions[from] = { step: 'MAIN' };
@@ -249,7 +263,8 @@ app.get('/comprobantes', (req, res) => {
         <div class="card">
           <p>📱 <strong>Cliente:</strong> +${item.from}</p>
           <p>🧩 <strong>Operación:</strong> <span style="color:#29b6f6; font-weight:bold;">${item.modulo}</span></p>
-          <p>🏷️ <strong>Categoría:</strong> ${item.categoria}</p>
+          <p>🏷️ <strong>Detalle:</strong> ${item.categoria}</p>
+          <p>💵 <strong>Monto Esperado:</strong> $${item.precio.toLocaleString('es-CO')} COP</p>
           <p>⏰ <strong>Recibido:</strong> ${item.fechaEnvio}</p>
           <p>📌 <strong>Estado:</strong> <span class="badge ${item.estado}">${item.estado}</span></p>
           <p>🖼 <a class="btn" href="/ver-imagen/${item.mediaId}" target="_blank">Ver Comprobante</a></p>
@@ -257,7 +272,7 @@ app.get('/comprobantes', (req, res) => {
           ${item.estado === 'PENDIENTE' ? `
             <form action="/autorizar" method="POST">
               <input type="hidden" name="id" value="${item.id}">
-              <button type="submit" class="btn-autorizar">✅ Aprobar Pago y Asignar Casilla</button>
+              <button type="submit" class="btn-autorizar">✅ Aprobar Pago y Asignar Casillas</button>
             </form>
           ` : `<p style="color:#00e676;">✨ Procesado el ${item.fechaAprobacion || 'N/A'}</p>`}
         </div>
@@ -274,21 +289,27 @@ app.post('/autorizar', async (req, res) => {
   const item = comprobantesRecibidos.find(c => c.id === id);
 
   if (item && item.estado === 'PENDIENTE') {
-    contadorStickers = (contadorStickers % 100) + 1;
-    const codigoGenerado = `STK-${String(contadorStickers).padStart(3, '0')}`;
+    const cantidad = item.cantidad || 1;
+    let codigosAsignados = [];
+
+    for (let i = 0; i < cantidad; i++) {
+      contadorStickers = (contadorStickers % 100) + 1;
+      codigosAsignados.push(`STK-${String(contadorStickers).padStart(3, '0')}`);
+    }
 
     item.estado = 'APROBADO';
     item.fechaAprobacion = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' });
 
+    const codigosTexto = codigosAsignados.map(c => `• *${c}*`).join('\n');
+
     const msg = 
       `🎨 *==============================*\n` +
-      `🏅 *STICKER DIGITAL LLANIX* 🏅\n` +
+      `🏅 *STICKERS DIGITALES LLANIX* 🏅\n` +
       `*==============================*\n\n` +
       `✅ *PAGO VERIFICADO Y CONFIRMADO*\n\n` +
-      `🆔 *CÓDIGO OFICIAL:* *${codigoGenerado}*\n` +
-      `🥇 *ORDEN DE LLEGADA:* #${contadorStickers}\n` +
-      `📦 *CATEGORÍA:* ${item.categoria}\n\n` +
-      `🏆 Si obtuviste la casilla **STK-100**, ¡ganas el pozo acumulado! Gracias por comprar con Llanix. 🚀`;
+      `📦 *Cantidad Adquirida:* ${cantidad}\n` +
+      `🆔 *CÓDIGOS OFICIALES ASIGNADOS:*\n${codigosTexto}\n\n` +
+      `🏆 Si alguno de tus códigos es el **STK-100**, ¡obtienes la bonificación de $140.000 COP! Gracias por tu compra. 🚀`;
 
     await sendWhatsAppMessage(item.from, msg);
   }
